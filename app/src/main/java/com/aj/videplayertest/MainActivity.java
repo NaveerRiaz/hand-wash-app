@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.util.Log;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.MediaController;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -52,6 +53,7 @@ public class MainActivity extends AppCompatActivity {
     private ClientSocket socket;
     private MotionDataSocket motionSocket;
     private VideoView videoView;
+    private ImageView imageView;
     private MediaPlayer mediaPlayer;
     private TextView logText, timerText, predictedClassText, correctCountText,
             requiredClassText, motionText, sessionTimeText;
@@ -317,6 +319,7 @@ public class MainActivity extends AppCompatActivity {
                         }
 
                         if (schedule > 11 && IN_SESSION) {
+                            imageView.setVisibility(View.INVISIBLE);
                             IN_SESSION = false;
                             try {
                                 String filename = Environment.getExternalStorageDirectory().getPath() +
@@ -531,6 +534,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void initializeViews() {
         videoView = findViewById(R.id.videoView);
+        imageView = findViewById(R.id.imageView);
         logText = findViewById(R.id.logText);
         timerText = findViewById(R.id.timer);
         predictedClassText = findViewById((R.id.prediction));
@@ -596,9 +600,12 @@ public class MainActivity extends AppCompatActivity {
             public void onFrameReceived(Bitmap b) {
                 if (b != null) {
                     if (schedule > 1 && schedule < 12) {
-
+                        if (!imageView.isShown()) {
+                            imageView.setVisibility(View.VISIBLE);
+                        }
                         bitmapExecutor.submit(() -> {
                             Category label = classifyImage(b);
+                            imageView.setImageBitmap(b);
                             if (label != null) {
                                 labelList.add(label);
                             }
@@ -628,6 +635,7 @@ public class MainActivity extends AppCompatActivity {
                             } else {
                                 motionCounter = 0;
                                 isMotion = false;
+                                imageView.setVisibility(View.INVISIBLE);
                             }
                         }
                     } catch (Exception e) {
@@ -635,6 +643,7 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     if (schedule == 1 && isMotion) {
+                        initializeArrays();
                         updateMotionText("");
                         correctCounter = 0;
                         incrementSynchronized();
@@ -673,6 +682,17 @@ public class MainActivity extends AppCompatActivity {
 
     private void initializeArrays() {
         labelList = new ArrayList<>();
+
+        inferenceTimes = new LinkedList[NUM_CLASSES];
+        inferenceConfidence = new LinkedList[NUM_CLASSES];
+        inferenceClass = new LinkedList[NUM_CLASSES];
+
+        for (int i = 0; i < NUM_CLASSES; i++) {
+            inferenceTimes[i] = new LinkedList<>();
+            inferenceConfidence[i] = new LinkedList<>();
+            inferenceClass[i] = new LinkedList<>();
+        }
+
     }
 
     @Override
@@ -713,16 +733,6 @@ public class MainActivity extends AppCompatActivity {
         initializeTimerTask(BITMAP_TIMER_ID);
         initializeTimerTask(SCHEDULE_TIMER_ID);
         initializeTimerTask(VIDEO_TIMER_ID);
-
-        inferenceTimes = new LinkedList[NUM_CLASSES];
-        inferenceConfidence = new LinkedList[NUM_CLASSES];
-        inferenceClass = new LinkedList[NUM_CLASSES];
-
-        for (int i = 0; i < NUM_CLASSES; i++) {
-            inferenceTimes[i] = new LinkedList<>();
-            inferenceConfidence[i] = new LinkedList<>();
-            inferenceClass[i] = new LinkedList<>();
-        }
 
         correctCounter = 0;
         motionCounter = 0;

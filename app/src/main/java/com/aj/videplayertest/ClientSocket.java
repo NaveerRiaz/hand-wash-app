@@ -67,15 +67,17 @@ public class ClientSocket implements Runnable
                         // Parse JSON and extract the float value
                         JsonParser parser = new JsonParser();
                         JsonObject jsonObject = parser.parse(jsonData).getAsJsonObject();
-                        boolean motionFlag = jsonObject.get("bool").getAsBoolean();
+                        boolean motionFlag = jsonObject.get("hands_moving_flag").getAsBoolean();
                         String imageBase64 = jsonObject.get("image").getAsString();
                         boolean camera_ok = jsonObject.get("camera_status").getAsBoolean();
                         String rfid = jsonObject.get("rf_tag").getAsString();
+                        float distance_to_person_standing = jsonObject.get("distance_to_person_standing").getAsFloat();
 
                         byte[] imageBytes = Base64.decode(imageBase64, Base64.DEFAULT);
                         Bitmap bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
 
                         this.clientConnected.onClientConnected();
+                        this.clientConnected.onFloatReceived(distance_to_person_standing);
                         this.clientConnected.onFrameReceived(bitmap, motionFlag, camera_ok, rfid);
 
                     } catch (Exception e) {
@@ -87,12 +89,14 @@ public class ClientSocket implements Runnable
                     socket.close();
                 } catch (Exception e) {
                     running = false;
-                    this.clientConnected.onClientError(e.getMessage());
+                    this.clientConnected.onClientDisconnected("Disconnected");
+                    System.out.println(e.getMessage());
                 }
             }
         } catch (Exception e) {
             running = false;
-            this.clientConnected.onClientError(e.getMessage());
+            this.clientConnected.onClientDisconnected("Disconnected");
+            System.out.println(e.getMessage());
         }
     }
 }

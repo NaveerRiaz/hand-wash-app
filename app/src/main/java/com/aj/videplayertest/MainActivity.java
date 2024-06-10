@@ -65,6 +65,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.net.Socket;
 import java.nio.charset.Charset;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -92,12 +94,12 @@ public class MainActivity extends AppCompatActivity {
     private final int NUM_CLASSES = 9; // Change this to match the number of classes in your model
     private final int BITMAP_TIMER_ID = 0;
     private final int VIDEO_TIMER_ID = 1;
-    private final int MOTION_TIMER_ID = 2;
+    private final int SEND_SOCKET_TIMER_ID = 2;
     private final int SCHEDULE_TIMER_ID = 3;
     private final int INFERENCE_TIMER_ID = 4;
     private final int CONFIG_TIMER_ID = 5;
     private final int[] TIMER_DELAYS = {0, 0, 0, 0, 0, 0};
-    private final int[] TIMER_PERIODS = {1000, 100, 1000, 100, 1, 5000};
+    private final int[] TIMER_PERIODS = {500, 100, 500, 100, 1, 5000};
     private final int NUM_THREADS = 5;
     long timeElapsed = 0;
     ConcurrentLinkedQueue<String> imageFilenames;
@@ -109,7 +111,6 @@ public class MainActivity extends AppCompatActivity {
     private ApiClient sessionDataApi, configApi;
     private BroadcastReceiver batteryLevelReceiver;
     private ClientSocket socket;
-    private MotionDataSocket motionSocket;
     private VideoView videoView;
     private ImageView imageView;
     private MediaPlayer beepSuccess, beepFailure, beepRfTag;
@@ -137,9 +138,9 @@ public class MainActivity extends AppCompatActivity {
     private int MIN_FRAMES_TO_BEGIN_PROCESS;
     private double THRESHOLD_MOTION;
     private ExecutorService executor, motionExecutor, bitmapExecutor, apiExecutor, configExecutor, audioExecutor;
-    private Timer bitmapSocketControlTimer, motionSocketControlTimer, videoControlTimer, scheduleTimer, inferenceTimer, configTimer;
-    private TimerTask scheduleTimerTask, motionSocketTimerTask, bitmapSocketTimerTask, videoControlTimerTask, inferenceTimerTask, configTimerTask;
-    private MessageSender sender;
+    private Timer bitmapSocketControlTimer, sendSocketControlTimer, videoControlTimer, scheduleTimer, inferenceTimer, configTimer;
+    private TimerTask scheduleTimerTask, sendSocketTimerTask, bitmapSocketTimerTask, videoControlTimerTask, inferenceTimerTask, configTimerTask;
+//    private MessageSender sender;
     private int LAST_STAGE_TIMEOUT;
     private volatile boolean SAVE_FRAMES;
     private double CONFIDENCE_THRESHOLD_PRE_STAGE;
@@ -197,8 +198,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startTimer(int timerId) {
-        Timer[] timers = {bitmapSocketControlTimer, videoControlTimer, motionSocketControlTimer, scheduleTimer, inferenceTimer, configTimer};
-        TimerTask[] timerTasks = {bitmapSocketTimerTask, videoControlTimerTask, motionSocketTimerTask, scheduleTimerTask, inferenceTimerTask, configTimerTask};
+        Timer[] timers = {bitmapSocketControlTimer, videoControlTimer, sendSocketControlTimer, scheduleTimer, inferenceTimer, configTimer};
+        TimerTask[] timerTasks = {bitmapSocketTimerTask, videoControlTimerTask, sendSocketTimerTask, scheduleTimerTask, inferenceTimerTask, configTimerTask};
 
         if (timers[timerId] != null && timerTasks[timerId] != null) {
             // Schedule the timer task
@@ -219,7 +220,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void stopTimer(int timerId) {
 
-        Timer[] timers = {bitmapSocketControlTimer, videoControlTimer, motionSocketControlTimer, scheduleTimer, inferenceTimer, configTimer};
+        Timer[] timers = {bitmapSocketControlTimer, videoControlTimer, sendSocketControlTimer, scheduleTimer, inferenceTimer, configTimer};
 
         if (timers[timerId] != null) {
             // Cancel the timer
@@ -236,8 +237,8 @@ public class MainActivity extends AppCompatActivity {
                 bitmapSocketControlTimer = new Timer("bitmap-socket-main-control");
             case VIDEO_TIMER_ID:
                 videoControlTimer = new Timer("video-control-timer");
-            case MOTION_TIMER_ID:
-                motionSocketControlTimer = new Timer();
+            case SEND_SOCKET_TIMER_ID:
+                sendSocketControlTimer = new Timer();
             case SCHEDULE_TIMER_ID:
                 scheduleTimer = new Timer("schedule-timer");
             case INFERENCE_TIMER_ID:
@@ -363,19 +364,33 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 };
-            case MOTION_TIMER_ID:
-                motionSocketTimerTask = new TimerTask() {
+            case SEND_SOCKET_TIMER_ID:
+                sendSocketTimerTask = new TimerTask() {
                     @Override
                     public void run() {
-                        if (motionSocket != null) {
-                            if (!motionSocket.isRunning()) {
-                                long currentTime = System.currentTimeMillis();
-                                if (currentTime - timeElapsed >= RECONNECT_AFTER) {
-                                    motionSocket.start();
-                                    timeElapsed = System.currentTimeMillis();
-                                }
+                        try {
+                            Socket s = new Socket("127.0.0.1", 7777);
+                            PrintWriter pw = new PrintWriter(s.getOutputStream());
+                            pw.write(schedule+";"+openCase);
+                            pw.flush();
+                            pw.close();
+                            s.close();
+                            runOnUiThread(()-> socketsStatusTextView.setTextColor(Color.GREEN));
+                        } catch (IOException e) {
+                            runOnUiThread(()-> socketsStatusTextView.setTextColor(Color.RED));
+                            e.printStackTrace();
+                        }
+
+                        if (openCase) {
+                            openCaseRequestCount++;
+
+                            if (openCaseRequestCount >= 5) {
+                                toggleOpenCase();
+                                handler.post(()->userGreetingTextView.setText(""));
+                                openCaseRequestCount = 0;
                             }
                         }
+
                     }
                 };
 
@@ -383,20 +398,11 @@ public class MainActivity extends AppCompatActivity {
                 scheduleTimerTask = new TimerTask() {
                     @Override
                     public void run() {
-                        if (schedule > 0 && schedule <= 11) {
-                            sender.doInBackground(schedule + ";" + openCase);
-                            if (openCase) {
-                                openCaseRequestCount++;
-
-                                if (openCaseRequestCount >= 5) {
-                                    toggleOpenCase();
-                                    handler.post(()->userGreetingTextView.setText(""));
-                                    openCaseRequestCount = 0;
-                                }
-                            }
-                        } else {
-                            sender.doInBackground("-1;false");
-                        }
+//                        if (schedule > 0 && schedule <= 11) {
+//                            sender.doInBackground(schedule + ";" + openCase);
+//                        } else {
+//                            sender.doInBackground("-1;false");
+//                        }
                     }
                 };
 
@@ -814,6 +820,47 @@ public class MainActivity extends AppCompatActivity {
         this.socket = new ClientSocket(getApplicationContext(), new OnClientConnected() {
             @Override
             public void onFloatReceived(float value) {
+
+                updateMotionText(String.format(Locale.US, "%1.0f", value));
+
+                motionExecutor.submit(() -> {
+                    try {
+                        if (value >= 0) {
+                            if (value >= THRESHOLD_MOTION) {
+                                motionCounter++;
+                                if (motionCounter > 10) {
+                                    isMotion = true;
+                                }
+                            } else {
+                                if (isMotion) {
+                                    motionCounter = 0;
+                                    isMotion = false;
+                                    hideMicrophones();
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        Log.i("ERROR", "Error reading float from motionValueList!");
+                    }
+
+                    if (schedule == 1 && isMotion) {
+
+                        spokenNumbers = "";
+                        handler.post(()-> {
+                            userGreetingTextView.setText("");
+                            speechInfoContainer.setVisibility(View.VISIBLE);
+                            promptSpeechInput();
+                        });
+                        initializeArrays();
+                        updateMotionText("");
+                        correctCounter = 0;
+                        setupConfig();
+                        incrementSynchronized();
+                        videoView.seekTo(scheduleList.get(schedule).getStart());
+                        timePassed = System.currentTimeMillis();
+                    }
+
+                });
             }
 
             @Override
@@ -896,79 +943,6 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 }
-            }
-        });
-
-        this.motionSocket = new MotionDataSocket(getApplicationContext(), new OnClientConnected() {
-            @Override
-            public void onFloatReceived(float value) {
-                updateMotionText(String.format(Locale.US, "%1.0f", value));
-
-                motionExecutor.submit(() -> {
-                    try {
-                        if (value >= 0) {
-                            if (value >= THRESHOLD_MOTION) {
-                                motionCounter++;
-                                if (motionCounter > 10) {
-                                    isMotion = true;
-                                }
-                            } else {
-                                if (isMotion) {
-                                    motionCounter = 0;
-                                    isMotion = false;
-                                    hideMicrophones();
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        Log.i("ERROR", "Error reading float from motionValueList!");
-                    }
-
-                    if (schedule == 1 && isMotion) {
-
-                        spokenNumbers = "";
-                        handler.post(()-> {
-                            userGreetingTextView.setText("");
-                            speechInfoContainer.setVisibility(View.VISIBLE);
-                            promptSpeechInput();
-                        });
-                        initializeArrays();
-                        updateMotionText("");
-                        correctCounter = 0;
-                        setupConfig();
-                        incrementSynchronized();
-                        videoView.seekTo(scheduleList.get(schedule).getStart());
-                        timePassed = System.currentTimeMillis();
-                    }
-
-                });
-            }
-
-            @Override
-            public void onMessageReceived() {
-            }
-
-            @Override
-            public void onClientConnected() {
-                handler.post(() -> socketsStatusTextView.setTextColor(Color.GREEN));
-            }
-
-            @Override
-            public void onClientDisconnected(String message) {
-                hideMicrophones();
-                handler.post(() -> socketsStatusTextView.setTextColor(Color.RED));
-            }
-
-            @Override
-            public void onClientError(String message) {
-            }
-
-            @Override
-            public void updateFPS(String message) {
-            }
-
-            @Override
-            public void onFrameReceived(Bitmap frame, boolean motionFlag, boolean camera_status, String rfid) {
             }
         });
     }
@@ -1131,7 +1105,7 @@ public class MainActivity extends AppCompatActivity {
                 initializeArrays();
                 prepareImageClassifier();
                 setupSockets();
-                sender = new MessageSender();
+//                sender = new MessageSender();
 
                 beepSuccess = MediaPlayer.create(this, R.raw.tone);
                 beepFailure = MediaPlayer.create(this, R.raw.tone_fail);
@@ -1143,13 +1117,13 @@ public class MainActivity extends AppCompatActivity {
 
                 setupVideo();
 
-                initializeTimer(MOTION_TIMER_ID);
+                initializeTimer(SEND_SOCKET_TIMER_ID);
                 initializeTimer(BITMAP_TIMER_ID);
                 initializeTimer(SCHEDULE_TIMER_ID);
                 initializeTimer(VIDEO_TIMER_ID);
                 initializeTimer(CONFIG_TIMER_ID);
 
-                initializeTimerTask(MOTION_TIMER_ID);
+                initializeTimerTask(SEND_SOCKET_TIMER_ID);
                 initializeTimerTask(BITMAP_TIMER_ID);
                 initializeTimerTask(SCHEDULE_TIMER_ID);
                 initializeTimerTask(VIDEO_TIMER_ID);
@@ -1165,7 +1139,7 @@ public class MainActivity extends AppCompatActivity {
                 startTimer(SCHEDULE_TIMER_ID);
                 startTimer(VIDEO_TIMER_ID);
                 startTimer(BITMAP_TIMER_ID);
-                startTimer(MOTION_TIMER_ID);
+                startTimer(SEND_SOCKET_TIMER_ID);
                 startTimer(INFERENCE_TIMER_ID);
                 startTimer(CONFIG_TIMER_ID);
 
@@ -1228,7 +1202,7 @@ public class MainActivity extends AppCompatActivity {
             Log.i("MEDIAPLAYER", "Error while releasing resources for media player: " + e.getMessage());
         }
 
-        stopTimer(MOTION_TIMER_ID);
+        stopTimer(SEND_SOCKET_TIMER_ID);
         stopTimer(BITMAP_TIMER_ID);
         stopTimer(VIDEO_TIMER_ID);
         stopTimer(SCHEDULE_TIMER_ID);
@@ -1236,7 +1210,7 @@ public class MainActivity extends AppCompatActivity {
         stopTimer(CONFIG_TIMER_ID);
 
         socket.stop();
-        motionSocket.stop();
+//        motionSocket.stop();
 
         shutdown(executor);
         shutdown(bitmapExecutor);

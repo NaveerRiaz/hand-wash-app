@@ -1,11 +1,15 @@
 package com.aj.videplayertest;
+
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.util.Base64;
 
-import java.io.BufferedInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.Socket;
 
 public class ClientSocket implements Runnable
@@ -56,32 +60,30 @@ public class ClientSocket implements Runnable
                     // create new socket and connect to the server
                     Socket socket = new Socket("127.0.0.1", 12345);
 
-                    DataInputStream dataInputStream = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
-                    byte[] byteArray = new byte[1024];
-                    int read;
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    String jsonData = reader.readLine();
 
-                    ByteArrayOutputStream byteBuffer = new ByteArrayOutputStream();
+                    try {
+                        // Parse JSON and extract the float value
+                        JsonParser parser = new JsonParser();
+                        JsonObject jsonObject = parser.parse(jsonData).getAsJsonObject();
+                        boolean motionFlag = jsonObject.get("bool").getAsBoolean();
+                        String imageBase64 = jsonObject.get("image").getAsString();
+                        boolean camera_ok = jsonObject.get("camera_status").getAsBoolean();
+                        String rfid = jsonObject.get("rf_tag").getAsString();
 
-                    while ((read = dataInputStream.read(byteArray)) != -1) {
-                        byteBuffer.write(byteArray, 0, read);
-                    }
+                        byte[] imageBytes = Base64.decode(imageBase64, Base64.DEFAULT);
+                        Bitmap bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
 
-                    if (byteBuffer.size() > 10) {
-                        noSignalCount = 0;
                         this.clientConnected.onClientConnected();
-                        byte[] byteArrayFinal = byteBuffer.toByteArray();
+                        this.clientConnected.onFrameReceived(bitmap, motionFlag, camera_ok, rfid);
 
-                        Bitmap bitmap = BitmapFactory.decodeByteArray(byteArrayFinal, 0, byteArrayFinal.length);
-
-                        this.clientConnected.onFrameReceived(bitmap);
-                    } else {
-                        noSignalCount++;
-                        if (noSignalCount >= 3) {
-                            this.clientConnected.onClientDisconnected("Disconnected");
-                        }
+                    } catch (Exception e) {
+                        this.clientConnected.onClientDisconnected("Disconnected");
+                        System.out.println(e.getMessage());
+                        running = false;
                     }
 
-                    byteBuffer.close();
                     socket.close();
                 } catch (Exception e) {
                     running = false;

@@ -65,9 +65,11 @@ public class MotionDataSocket implements Runnable
                     JsonObject jsonObject = parser.parse(jsonData).getAsJsonObject();
                     float receivedFloat = jsonObject.get("float_number").getAsFloat();
 
+                    this.clientConnected.onClientConnected();
                     this.clientConnected.onFloatReceived(receivedFloat);
                     socket.close();
                 } catch (Exception e) {
+                    this.clientConnected.onClientDisconnected("Disconnected");
                     running = false;
                 }
             }
